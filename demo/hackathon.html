@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SENTRY-9 // Threat Correlation Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B1220;
+    --panel:#111A2C;
+    --panel-raised:#16213A;
+    --line:#223049;
+    --text:#DCE6F0;
+    --text-dim:#7C8BA3;
+    --text-faint:#4C5A73;
+    --crit:#FF5C5C;
+    --crit-dim:#4A2226;
+    --high:#FFB020;
+    --high-dim:#463420;
+    --nominal:#4FD98E;
+    --nominal-dim:#1E3A2E;
+    --false-pos:#5C7599;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'Inter', sans-serif;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 24px;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#0D1626,#0B1220);
+  }
+  .brand{display:flex; align-items:center; gap:12px;}
+  .brand-mark{
+    width:34px; height:34px; border:1px solid var(--nominal);
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--mono); font-size:13px; font-weight:600;
+    color:var(--nominal); position:relative;
+  }
+  .brand-mark::after{
+    content:""; position:absolute; inset:4px;
+    border:1px solid var(--nominal); opacity:.4;
+  }
+  .brand-text h1{font-size:15px; font-weight:600; letter-spacing:.02em;}
+  .brand-text p{font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:1px;}
+  .top-status{display:flex; gap:28px; align-items:center;}
+  .stat-block{text-align:right;}
+  .stat-block .num{font-family:var(--mono); font-size:18px; font-weight:600;}
+  .stat-block .lbl{font-size:11px; color:var(--text-dim); margin-top:2px;}
+  .clock{font-family:var(--mono); font-size:13px; color:var(--text-dim); border-left:1px solid var(--line); padding-left:24px;}
+
+  /* ---------- Layout ---------- */
+  .layout{
+    display:grid;
+    grid-template-columns: 260px 1fr 400px;
+    min-height:calc(100vh - 68px);
+  }
+  @media (max-width: 1100px){
+    .layout{grid-template-columns: 1fr;}
+  }
+
+  /* ---------- Sidebar: sources ---------- */
+  .sidebar{
+    border-right:1px solid var(--line);
+    padding:20px 16px;
+  }
+  .sidebar h2, .panel-title{
+    font-size:12px; color:var(--text-dim); font-weight:600;
+    margin-bottom:14px; padding-bottom:8px; border-bottom:1px solid var(--line);
+  }
+  .source-row{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 0; border-bottom:1px solid #16203350;
+  }
+  .source-name{display:flex; align-items:center; gap:8px; font-size:13px;}
+  .dot{width:7px; height:7px; border-radius:50%; flex-shrink:0;}
+  .dot.up{background:var(--nominal); box-shadow:0 0 6px var(--nominal);}
+  .dot.degraded{background:var(--high);}
+  .source-count{font-family:var(--mono); font-size:12px; color:var(--text-dim);}
+
+  .threat-gauge{margin-top:28px; padding:16px; background:var(--panel); border:1px solid var(--line);}
+  .threat-gauge .lvl{font-family:var(--mono); font-size:26px; font-weight:600; color:var(--high); letter-spacing:.02em;}
+  .threat-gauge .desc{font-size:11px; color:var(--text-dim); margin-top:4px; line-height:1.5;}
+  .gauge-bar{height:5px; background:#1A2438; margin-top:12px; overflow:hidden;}
+  .gauge-fill{height:100%; width:64%; background:linear-gradient(90deg,var(--nominal),var(--high));}
+
+  /* ---------- Center: alert feed ---------- */
+  .feed{padding:20px 22px; overflow-y:auto;}
+  .feed-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;}
+  .feed-header h2{font-size:14px; font-weight:600;}
+  .filters{display:flex; gap:6px;}
+  .filter-btn{
+    font-family:var(--mono); font-size:11px; background:none; color:var(--text-dim);
+    border:1px solid var(--line); padding:6px 10px; cursor:pointer;
+  }
+  .filter-btn:hover{border-color:var(--text-dim); color:var(--text);}
+  .filter-btn.active{background:var(--panel-raised); color:var(--text); border-color:var(--text-dim);}
+
+  .cluster{
+    border:1px solid var(--line); margin-bottom:12px; background:var(--panel);
+    cursor:pointer;
+  }
+  .cluster:hover{border-color:#38547d;}
+  .cluster.selected{border-color:var(--nominal); box-shadow:0 0 0 1px var(--nominal) inset;}
+  .cluster-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 14px; border-bottom:1px solid var(--line);
+  }
+  .cluster-title{display:flex; align-items:center; gap:10px;}
+  .sev-tag{
+    font-family:var(--mono); font-size:10px; font-weight:600; padding:3px 7px;
+    letter-spacing:.03em;
+  }
+  .sev-critical{background:var(--crit-dim); color:var(--crit); border:1px solid #5c2a2a;}
+  .sev-high{background:var(--high-dim); color:var(--high); border:1px solid #5c4a20;}
+  .sev-fp{background:#1A2438; color:var(--false-pos); border:1px solid var(--line);}
+  .cluster-title span.name{font-size:13.5px; font-weight:500;}
+  .cluster-meta{font-family:var(--mono); font-size:11px; color:var(--text-faint);}
+  .cluster-body{padding:12px 14px;}
+  .cluster-body .summary{font-size:12.5px; color:var(--text-dim); line-height:1.55; margin-bottom:10px;}
+  .indicator-row{display:flex; gap:6px; flex-wrap:wrap;}
+  .chip{
+    font-family:var(--mono); font-size:10.5px; color:var(--text-dim);
+    border:1px solid var(--line); padding:3px 8px; background:#0F1729;
+  }
+  .chip.technique{color:#9EB8FF; border-color:#243459;}
+  .confidence-row{display:flex; align-items:center; gap:10px; margin-top:10px;}
+  .confidence-row .lbl{font-size:11px; color:var(--text-faint);}
+  .conf-bar{flex:1; height:4px; background:#1A2438;}
+  .conf-fill{height:100%;}
+
+  /* ---------- Right: BLUF panel ---------- */
+  .bluf-panel{
+    border-left:1px solid var(--line);
+    padding:20px 22px;
+    display:flex; flex-direction:column;
+  }
+  .bluf-empty{
+    flex:1; display:flex; align-items:center; justify-content:center;
+    text-align:center; color:var(--text-faint); font-size:12.5px; line-height:1.6;
+    padding:20px;
+  }
+  .bluf-doc{display:none;}
+  .bluf-doc.show{display:block;}
+  .bluf-doc-head{border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:16px;}
+  .bluf-doc-head .tag{font-family:var(--mono); font-size:10.5px; color:var(--text-faint); letter-spacing:.04em;}
+  .bluf-doc-head h3{font-size:15px; margin-top:6px; line-height:1.4;}
+  .bluf-section{margin-bottom:16px;}
+  .bluf-section .h{font-family:var(--mono); font-size:10.5px; color:var(--nominal); letter-spacing:.05em; margin-bottom:6px;}
+  .bluf-section .b{font-size:12.5px; line-height:1.6; color:var(--text);}
+  .bluf-section ul{padding-left:16px; margin-top:4px;}
+  .bluf-section li{font-size:12px; color:var(--text-dim); margin-bottom:4px; line-height:1.5;}
+  .action-btn{
+    margin-top:6px; width:100%; padding:10px; background:var(--nominal); color:#08130E;
+    border:none; font-family:var(--mono); font-size:11.5px; font-weight:600; cursor:pointer;
+    letter-spacing:.03em;
+  }
+  .action-btn:hover{background:#63E39F;}
+  .gen-btn{
+    margin-top:10px; width:100%; padding:9px; background:none; border:1px solid var(--nominal);
+    color:var(--nominal); font-family:var(--mono); font-size:11px; cursor:pointer;
+  }
+  .gen-btn:hover{background:#0F2A1C;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">S9</div>
+    <div class="brand-text">
+      <h1>SENTRY-9</h1>
+      <p>THREAT CORRELATION &amp; PRIORITISATION CONSOLE</p>
+    </div>
+  </div>
+  <div class="top-status">
+    <div class="stat-block"><div class="num" id="statAlerts">—</div><div class="lbl">RAW ALERTS / 24H</div></div>
+    <div class="stat-block"><div class="num" style="color:var(--nominal)" id="statClusters">—</div><div class="lbl">CORRELATED THREATS</div></div>
+    <div class="stat-block"><div class="num" style="color:var(--false-pos)" id="statFP">—</div><div class="lbl">SUPPRESSED FALSE POS.</div></div>
+    <div class="clock" id="clock">—</div>
+  </div>
+</div>
+
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <h2>FEED SOURCES</h2>
+    <div id="sourceList"></div>
+
+    <div class="threat-gauge">
+      <div class="lvl">ELEVATED</div>
+      <div class="desc">Composite posture across correlated clusters, weighted by confidence and asset criticality.</div>
+      <div class="gauge-bar"><div class="gauge-fill"></div></div>
+    </div>
+  </div>
+
+  <!-- FEED -->
+  <div class="feed">
+    <div class="feed-header">
+      <h2>CORRELATED THREAT CLUSTERS</h2>
+      <div class="filters">
+        <button class="filter-btn active" data-f="all">ALL</button>
+        <button class="filter-btn" data-f="critical">CRITICAL</button>
+        <button class="filter-btn" data-f="high">HIGH</button>
+        <button class="filter-btn" data-f="fp">FALSE POS.</button>
+      </div>
+    </div>
+    <div id="clusterList"></div>
+  </div>
+
+  <!-- BLUF -->
+  <div class="bluf-panel">
+    <div class="panel-title">COMMANDER BRIEF — BLUF</div>
+    <div class="bluf-empty" id="blufEmpty">
+      Select a correlated threat cluster and generate a Bottom-Line-Up-Front summary for review.
+    </div>
+    <div class="bluf-doc" id="blufDoc"></div>
+  </div>
+
+</div>
+
+<script>
+/* ---------------- Mock multi-source alert & correlation data ----------------
+   In production, SENTRY-9 ingests raw events from SIEM, cyber sensor grids,
+   SATCOM/ELINT feeds, and analyst intel reports, normalises them to a common
+   schema, and runs entity/time-window correlation + ATT&CK technique tagging
+   before this console ever sees them. Below is representative output of that
+   pipeline for demonstration. */
+
+const sources = [
+  {name:"SIEM — Splunk ES", status:"up", count: 1842},
+  {name:"Cyber Sensor Grid", status:"up", count: 764},
+  {name:"SATCOM / ELINT Feed", status:"degraded", count: 118},
+  {name:"OSINT / Analyst Reports", status:"up", count: 53},
+  {name:"Network Flow (NetFlow)", status:"up", count: 2231},
+  {name:"Endpoint (EDR)", status:"up", count: 940},
+];
+
+const clusters = [
+  {
+    id:"CL-0091",
+    name:"Credential phishing → C2 beacon, Finance VLAN",
+    severity:"critical",
+    confidence:91,
+    window:"03:14–04:52Z",
+    sources:["SIEM","EDR","NetFlow"],
+    alertCount:14,
+    techniques:[
+      {id:"T1566.002", name:"Phishing: Spearphishing Link"},
+      {id:"T1204.001", name:"User Execution: Malicious Link"},
+      {id:"T1071.001", name:"C2: Web Protocols"},
+      {id:"T1041", name:"Exfiltration Over C2 Channel"}
+    ],
+    summary:"Spearphishing email delivered to 3 Finance-VLAN endpoints preceded outbound beaconing to a newly-registered domain on a 47s jitter interval. EDR confirms process injection consistent with a known loader family; NetFlow shows a 40MB outbound transfer nine minutes before detection.",
+    bluf:"A finance-segment host was compromised via spearphishing and has established outbound command-and-control with evidence of data staging; immediate isolation is recommended.",
+    situation:"At 03:14Z, three Finance-VLAN endpoints received an email containing a malicious shortlink. One user executed the link at 03:22Z. EDR telemetry shows process injection into a signed system binary at 03:24Z, followed by beaconing to 185.-range infrastructure registered 6 days prior. A 40MB outbound transfer occurred at 04:41Z, 9 minutes before automated detection.",
+    action:"Isolate host FIN-WS-0142 from the network immediately. Rotate credentials for the affected user and any accounts accessed from that host in the last 72 hours. Block C2 domain and associated /24 at the perimeter. Escalate to IR team for full forensic triage.",
+    indicators:["FIN-WS-0142","user: r.alvarez","185.203.x.x (C2)","SHA256: 9f2a…c31 (loader)"]
+  },
+  {
+    id:"CL-0088",
+    name:"Coordinated recon sweep, external perimeter",
+    severity:"high",
+    confidence:74,
+    window:"22:05–23:40Z",
+    sources:["Cyber Sensor Grid","NetFlow"],
+    alertCount:9,
+    techniques:[
+      {id:"T1595.001", name:"Active Scanning: Scanning IP Blocks"},
+      {id:"T1590", name:"Gather Victim Network Information"},
+      {id:"T1046", name:"Network Service Scanning"}
+    ],
+    summary:"Sequential low-and-slow port scans from four distinct source IPs, sharing a TCP stack fingerprint, swept the entire public-facing /22 over 95 minutes. Scan cadence and IP rotation is consistent with reconnaissance tooling rather than opportunistic internet noise.",
+    bluf:"An external actor conducted structured reconnaissance of the full public IP range using rotating source addresses; no exploitation observed yet, but the pattern indicates deliberate targeting.",
+    situation:"Between 22:05Z and 23:40Z, sensor grid nodes logged 9 discrete scan events against the public /22. Source IPs rotated every ~20 minutes but shared an identical TCP/IP stack fingerprint, indicating a single operator behind rotating infrastructure. No exploitation attempts followed within the observation window.",
+    action:"Increase monitoring sensitivity on the scanned /22 for 72 hours. Cross-reference source infrastructure against threat intel feeds for known scanning-as-a-service providers. No isolation action required at this time; log for correlation with any follow-on activity.",
+    indicators:["203.0.113.0/22 (target)","4 rotating source IPs","shared TCP fingerprint: p0f-9931"]
+  },
+  {
+    id:"CL-0079",
+    name:"Anomalous SATCOM uplink burst, Sector 7",
+    severity:"high",
+    confidence:68,
+    window:"11:02–11:09Z",
+    sources:["SATCOM / ELINT Feed"],
+    alertCount:3,
+    techniques:[
+      {id:"T1583.004", name:"Acquire Infrastructure: Server"},
+      {id:"T1205", name:"Traffic Signaling"}
+    ],
+    summary:"A 7-minute uplink burst on an unassigned frequency segment within Sector 7 was flagged for signal characteristics inconsistent with known regional emitters. ELINT confidence is moderate; signal has not repeated in 6 hours of continued monitoring.",
+    bluf:"An unidentified short-duration signal was detected in Sector 7 with characteristics that do not match the known regional emitter library; assessed as possible but unconfirmed adversary signaling activity.",
+    situation:"At 11:02Z, ELINT sensors recorded a 7-minute burst on an unassigned frequency segment. Signal modulation does not match any emitter in the current regional library. No repeat activity has been observed in the following 6-hour monitoring window.",
+    action:"Maintain passive monitoring on the flagged frequency segment for 48 hours. Task analyst review against archived emitter libraries from allied collection. Do not escalate to kinetic or active-measures posture on current evidence.",
+    indicators:["Freq. segment: unassigned-7C","Duration: 7 min","Bearing: Sector 7, grid ref withheld"]
+  },
+  {
+    id:"CL-0102",
+    name:"Repeated failed VPN auth, single contractor account",
+    severity:"fp",
+    confidence:22,
+    window:"09:00–09:14Z",
+    sources:["SIEM"],
+    alertCount:6,
+    techniques:[
+      {id:"T1110.001", name:"Brute Force: Password Guessing"}
+    ],
+    summary:"Six failed VPN authentications from a single contractor account, all from the contractor's registered home IP, within a 14-minute window. Pattern matches a mistyped-password event rather than credential attack; account locked automatically after threshold.",
+    bluf:"Failed VPN logins are assessed as a benign lockout from a legitimate contractor mistyping credentials; no further action required.",
+    situation:"Between 09:00Z and 09:14Z, six consecutive failed VPN authentications were logged against a single contractor account, all originating from the account's previously-verified home IP address. No other anomalous behavior preceded or followed the event.",
+    action:"No investigative action required. Auto-generated lockout notice sent to contractor for self-service unlock via standard help-desk workflow. Retain in log for baseline pattern only.",
+    indicators:["contractor: j.wren","source IP: registered/verified","6 attempts, single origin"]
+  }
+];
+
+function fmtClock(){
+  const d = new Date();
+  return d.toUTCString().slice(17,25) + " UTC";
+}
+setInterval(()=>{ document.getElementById('clock').textContent = fmtClock(); }, 1000);
+document.getElementById('clock').textContent = fmtClock();
+
+function renderSources(){
+  const el = document.getElementById('sourceList');
+  el.innerHTML = sources.map(s => `
+    <div class="source-row">
+      <div class="source-name"><span class="dot ${s.status}"></span>${s.name}</div>
+      <div class="source-count">${s.count.toLocaleString()}</div>
+    </div>
+  `).join('');
+}
+
+function sevMeta(sev){
+  if(sev==="critical") return {label:"CRITICAL", cls:"sev-critical", bar:"var(--crit)"};
+  if(sev==="high") return {label:"HIGH", cls:"sev-high", bar:"var(--high)"};
+  return {label:"FALSE POSITIVE", cls:"sev-fp", bar:"var(--false-pos)"};
+}
+
+let activeFilter = "all";
+let selectedId = null;
+
+function renderClusters(){
+  const list = document.getElementById('clusterList');
+  const filtered = clusters.filter(c=>{
+    if(activeFilter==="all") return true;
+    if(activeFilter==="fp") return c.severity==="fp";
+    return c.severity===activeFilter;
+  });
+
+  list.innerHTML = filtered.map(c=>{
+    const sm = sevMeta(c.severity);
+    return `
+    <div class="cluster ${c.id===selectedId?'selected':''}" data-id="${c.id}">
+      <div class="cluster-head">
+        <div class="cluster-title">
+          <span class="sev-tag ${sm.cls}">${sm.label}</span>
+          <span class="name">${c.name}</span>
+        </div>
+        <div class="cluster-meta">${c.id} · ${c.window}</div>
+      </div>
+      <div class="cluster-body">
+        <div class="summary">${c.summary}</div>
+        <div class="indicator-row">
+          ${c.sources.map(s=>`<span class="chip">${s}</span>`).join('')}
+          <span class="chip">${c.alertCount} raw alerts</span>
+          ${c.techniques.map(t=>`<span class="chip technique">${t.id}</span>`).join('')}
+        </div>
+        <div class="confidence-row">
+          <span class="lbl">CONFIDENCE</span>
+          <div class="conf-bar"><div class="conf-fill" style="width:${c.confidence}%; background:${sm.bar}"></div></div>
+          <span class="lbl" style="font-family:var(--mono); color:var(--text)">${c.confidence}%</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('.cluster').forEach(node=>{
+    node.addEventListener('click', ()=>{
+      selectedId = node.dataset.id;
+      renderClusters();
+      renderBluf(selectedId, false);
+    });
+  });
+}
+
+function renderBluf(id, autoGenerate){
+  const c = clusters.find(x=>x.id===id);
+  const empty = document.getElementById('blufEmpty');
+  const doc = document.getElementById('blufDoc');
+  if(!c){ empty.style.display='flex'; doc.classList.remove('show'); return; }
+
+  empty.style.display='none';
+  doc.classList.add('show');
+  const sm = sevMeta(c.severity);
+
+  doc.innerHTML = `
+    <div class="bluf-doc-head">
+      <div class="tag">${c.id} · ${sm.label} · CONFIDENCE ${c.confidence}%</div>
+      <h3>${c.name}</h3>
+    </div>
+
+    <div class="bluf-section">
+      <div class="h">BOTTOM LINE UP FRONT</div>
+      <div class="b">${c.bluf}</div>
+    </div>
+
+    <div class="bluf-section">
+      <div class="h">SITUATION</div>
+      <div class="b">${c.situation}</div>
+    </div>
+
+    <div class="bluf-section">
+      <div class="h">ATT&amp;CK TECHNIQUES</div>
+      <ul>${c.techniques.map(t=>`<li><span style="color:#9EB8FF; font-family:var(--mono)">${t.id}</span> — ${t.name}</li>`).join('')}</ul>
+    </div>
+
+    <div class="bluf-section">
+      <div class="h">SUPPORTING INDICATORS</div>
+      <ul>${c.indicators.map(i=>`<li>${i}</li>`).join('')}</ul>
+    </div>
+
+    <div class="bluf-section">
+      <div class="h">RECOMMENDED ACTION</div>
+      <div class="b">${c.action}</div>
+    </div>
+
+    <button class="action-btn" id="ackBtn">ACKNOWLEDGE &amp; ROUTE TO IR</button>
+  `;
+
+  document.getElementById('ackBtn').addEventListener('click', (e)=>{
+    e.target.textContent = "ROUTED TO IR — " + fmtClock();
+    e.target.disabled = true;
+    e.target.style.opacity = 0.6;
+    e.target.style.cursor = "default";
+  });
+}
+
+document.querySelectorAll('.filter-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    activeFilter = btn.dataset.f;
+    renderClusters();
+  });
+});
+
+function renderStats(){
+  const raw = sources.reduce((a,s)=>a+s.count,0);
+  document.getElementById('statAlerts').textContent = raw.toLocaleString();
+  document.getElementById('statClusters').textContent = clusters.filter(c=>c.severity!=="fp").length;
+  document.getElementById('statFP').textContent = "312";
+}
+
+renderSources();
+renderClusters();
+renderStats();
+</script>
+
+</body>
+</html>
